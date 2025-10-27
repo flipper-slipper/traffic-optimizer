@@ -4,7 +4,20 @@
         "**/.svn": true,
         "**/.hg": true,
         "**/.DS_Store": true,
-        "**/Thumbs.db": true
+        "**/Thumbs.db": true,
+        "pyproject.toml": true,
+        "README.md": true,
+        "uv.lock": true,
+        ".python-version": true,
+        ".venv": true,
+        ".vscode": true
     },
-    "hide-files.files": []
+    "hide-files.files": [
+        "pyproject.toml",
+        "README.md",
+        "uv.lock",
+        ".python-version",
+        ".venv",
+        ".vscode"
+    ]
 }
