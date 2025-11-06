@@ -9,6 +9,8 @@ for idx, result in enumerate(results):
     
     cv2.imshow('test', img)
     
-    if cv2.waitKey(20) & 0xFF == ord('q'):
+    if cv2.waitKey(20000) & 0xFF == ord('q'):
         cv2.destroyAllWindows()
         break
+    
+    # break
