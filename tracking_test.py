@@ -8,6 +8,8 @@ ret, frame = video.read()
 
 bbox = cv2.selectROI('Select ROI', frame, True)
 
+print(bbox)
+
 tracker.init(frame, bbox)
 
 while True:
