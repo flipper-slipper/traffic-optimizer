@@ -17,6 +17,8 @@ video = cv2.VideoCapture('dataset/example_recording.webm')
 # video = cv2.VideoCapture('dataset/Rush_Hour_Traffic_Stop_and_Go_Video.mp4')
 
 trackers = []
+
+multi_tracker = cv2.MultiTracker_create()
 ret, frame = video.read()
 
 bboxes = list(model.predict(frame))[0].boxes.xywh
