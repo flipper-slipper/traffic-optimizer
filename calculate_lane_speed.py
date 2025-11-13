@@ -84,7 +84,7 @@ callback_data = {
 cv2.namedWindow(lane_annotation_name) 
 cv2.setMouseCallback(lane_annotation_name, draw_lines_callback, callback_data) 
 
-while False:
+while True:
     cv2.imshow(lane_annotation_name, lane_annotation_frame)
     
     if(cv2.waitKey(1) == ord('q')):
@@ -92,7 +92,8 @@ while False:
         break
 
 points = callback_data['points']
-points = [(470, 195), (448, 51), (349, 198), (435, 45), (228, 200), (408, 60), (91, 203), (360, 65), (3, 196), (351, 49)]
+if(len(points) < 2):
+    points = [(470, 195), (448, 51), (349, 198), (435, 45), (228, 200), (408, 60), (91, 203), (360, 65), (3, 196), (351, 49)]
 lane_polygons = []
 
 for i in range(0, len(points), 2):
