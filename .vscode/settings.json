@@ -10,7 +10,11 @@
         "uv.lock": true,
         ".python-version": true,
         ".venv": true,
-        ".vscode": true
+        ".vscode": true,
+        "main.py": true,
+        "temp.py": true,
+        "tracking_test.py": true,
+        "image_test.py": true
     },
     "hide-files.files": [
         "pyproject.toml",
@@ -18,6 +22,10 @@
         "uv.lock",
         ".python-version",
         ".venv",
-        ".vscode"
+        ".vscode",
+        "main.py",
+        "temp.py",
+        "tracking_test.py",
+        "image_test.py"
     ]
 }
