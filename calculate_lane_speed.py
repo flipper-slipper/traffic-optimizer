@@ -18,9 +18,50 @@ video = cv2.VideoCapture('dataset/example_recording.webm')
 
 trackers = []
 
-multi_tracker = cv2.MultiTracker_create()
 ret, frame = video.read()
 
+def draw_lines_callback(event, x, y, flags, param):
+    points = param['points']
+    frame = param['frame']
+    window_name = param['window_name']
+    
+    if(event == cv2.EVENT_LBUTTONDOWN):
+        points.append((x, y))
+        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+        print(f"Point {len(points)} added: {(x, y)}")
+        
+        if len(points) > 0 and len(points) % 2 == 0:
+            # get the last two points
+            p1 = points[-2] 
+            p2 = points[-1] 
+            
+            # draw the actual line
+            cv2.line(frame, p1, p2, (0, 0, 255), 2) 
+            print(f"Line {len(points) // 2} drawn.")
+            
+        cv2.imshow(window_name, frame)    
+
+lane_annotation_name = "Draw Lanes"
+lane_annotation_frame = frame.copy()
+
+callback_data = {
+    'points': [],
+    'frame': lane_annotation_frame,
+    'window_name': lane_annotation_name
+}
+
+cv2.namedWindow(lane_annotation_name) 
+cv2.setMouseCallback(lane_annotation_name, draw_lines_callback, callback_data) 
+
+while True:
+    cv2.imshow(lane_annotation_name, lane_annotation_frame)
+    
+    if(cv2.waitKey(1) == ord('q')):
+        cv2.destroyWindow(lane_annotation_name)
+        break
+
+points = callback_data['points']
+print(points)
 bboxes = list(model.predict(frame))[0].boxes.xywh
 
 for idx, bbox in enumerate(bboxes):
@@ -29,7 +70,7 @@ for idx, bbox in enumerate(bboxes):
     tracker = create_tracker(frame, coords)
     trackers.append(tracker)
  
-YOLO_RERUN_FRAMES = 100
+YOLO_RERUN_FRAMES = 7
 
 frame_num = 0
 car_coords = []
