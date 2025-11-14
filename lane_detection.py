@@ -1,122 +1,332 @@
 import cv2
+from ultralytics import YOLO
 import numpy as np
 
-# storage for clicks
-points = []  
-# a copy for drawing
-drawing_frame_copy = None 
-drawing_window_name = 'Draw Lines (click in pairs). Press "q" to finish.'
+def create_tracker(frame, coords):
+    # convert center format to top-left for opencv tracker
+    x_center, y_center, w, h = coords
+    x = int(x_center - w / 2)
+    y = int(y_center - h / 2)
+    tracker = cv2.TrackerMIL.create()
+    tracker.init(frame, (x, y, int(w), int(h)))
+    return tracker
 
-# handles mouse events
-def draw_lines_callback(event, x, y, flags, param):
+def update_tracker(tracker, frame):
+    ret, bbox = tracker.update(frame)
+    if not ret:
+        return None
+    # get center point
+    cx = int(bbox[0] + bbox[2] / 2)
+    cy = int(bbox[1] + bbox[3] / 2)
+    return (cx, cy)
 
-    # use global variables
-    global points, drawing_frame_copy 
+def x_at_y(line, y):
+    p1, p2 = line
+    # handle horizontal lines
+    if abs(p2[1] - p1[1]) < 0.000001:
+        return (p1[0] + p2[0]) / 2.0
+    t = (y - p1[1]) / (p2[1] - p1[1])
+    return p1[0] + t * (p2[0] - p1[0])
 
-    # check for left click
-    if event == cv2.EVENT_LBUTTONDOWN:
-        # save the new point
-        points.append((x, y))
-        
-        # draw a dot for feedback
-        cv2.circle(drawing_frame_copy, (x, y), 5, (0, 255, 0), -1)
-        print(f"Point {len(points)} added: {(x, y)}")
+def line_dist(line1, line2, y_coord):
+    x1 = x_at_y(line1, y_coord)
+    x2 = x_at_y(line2, y_coord)
+    return abs(x1 - x2)
 
-        # check if we have a pair of points
-        if len(points) > 0 and len(points) % 2 == 0:
-            # get the last two points
-            p1 = points[-2] 
-            p2 = points[-1] 
-            
-            # draw the actual line
-            cv2.line(drawing_frame_copy, p1, p2, (0, 0, 255), 2) 
-            print(f"Line {len(points) // 2} drawn.")
-        
-        # update the display
-        cv2.imshow(drawing_window_name, drawing_frame_copy)
+def avg_lines(lines):
+    if len(lines) == 0:
+        return None, None
+    if len(lines) == 1:
+        return lines[0]
+    
+    all_ys = [line[0][1] for line in lines if line[0] is not None and line[1] is not None]
+    all_ys.extend([line[1][1] for line in lines if line[0] is not None and line[1] is not None])
+    
+    if len(all_ys) == 0:
+        return None, None
+    
+    y_min = int(min(all_ys))
+    y_max = int(max(all_ys))
+    y_samples = np.linspace(y_min, y_max, 10)
+    
+    x_values = []
+    for y in y_samples:
+        x_list = []
+        for line in lines:
+            if line[0] is not None and line[1] is not None:
+                p1, p2 = line
+                line_y_min = min(p1[1], p2[1])
+                line_y_max = max(p1[1], p2[1])
+                if line_y_min <= y <= line_y_max:
+                    x_list.append(x_at_y(line, y))
+        if len(x_list) > 0:
+            x_values.append(np.mean(x_list))
+        else:
+            x_values.append(None)
+    
+    valid_points = [(x, y_samples[i]) for i, x in enumerate(x_values) if x is not None]
+    
+    if len(valid_points) < 2:
+        return None, None
+    
+    return fit_line(np.array(valid_points))
 
-# set up the tracker
-tracker = cv2.TrackerMIL.create() 
-# open the video file
+def get_line_length(line):
+    if line[0] is None or line[1] is None:
+        return 0
+    p1, p2 = line
+    return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+
+def get_line_x_at_midpoint(line):
+    if line[0] is None or line[1] is None:
+        return None
+    p1, p2 = line
+    mid_y = (p1[1] + p2[1]) / 2.0
+    return x_at_y(line, mid_y)
+
+def select_lines(lane_lines_with_count, n=4):
+    if len(lane_lines_with_count) <= n:
+        return [line for line, _ in lane_lines_with_count]
+    
+    car_counts = [count for _, count in lane_lines_with_count]
+    lengths = [get_line_length(line) for line, _ in lane_lines_with_count]
+    
+    if len(car_counts) > 0:
+        max_cars = max(car_counts)
+    else:
+        max_cars = 1
+    if len(lengths) > 0:
+        max_length = max(lengths)
+    else:
+        max_length = 1
+    
+    scores = []
+    for i, (line, count) in enumerate(lane_lines_with_count):
+        if max_cars > 0:
+            car_score = count / max_cars
+        else:
+            car_score = 0
+        if max_length > 0:
+            length_score = lengths[i] / max_length
+        else:
+            length_score = 0
+        score = 0.4 * car_score + 0.6 * length_score
+        scores.append((score, line))
+    
+    scores.sort(reverse=True)
+    return [line for _, line in scores[:n]]
+
+def cluster(lane_lines, distance_threshold=30, num_test_points=5):
+    valid_lines = []
+    valid_indices = []
+    for idx, line in enumerate(lane_lines):
+        if line[0] is not None and line[1] is not None:
+            valid_lines.append(line)
+            valid_indices.append(idx)
+    
+    if len(valid_lines) == 0:
+        return []
+    
+    all_ys = []
+    for line in valid_lines:
+        all_ys.append(line[0][1])
+        all_ys.append(line[1][1])
+    y_min = min(all_ys)
+    y_max = max(all_ys)
+    test_ys = np.linspace(y_min, y_max, num_test_points)
+    
+    n = len(valid_lines)
+    distances = np.zeros((n, n))
+    for i in range(n):
+        for j in range(i + 1, n):
+            dists = [line_dist(valid_lines[i], valid_lines[j], y) for y in test_ys]
+            avg_dist = np.mean(dists)
+            distances[i, j] = avg_dist
+            distances[j, i] = avg_dist
+    
+    clusters = []
+    used = set()
+    for i in range(n):
+        if i in used:
+            continue
+        cluster = [valid_indices[i]]
+        used.add(i)
+        for j in range(n):
+            if j not in used and distances[i, j] <= distance_threshold:
+                cluster.append(valid_indices[j])
+                used.add(j)
+        clusters.append(cluster)
+    return clusters
+
+def fit_line(points):
+    if len(points) < 2:
+        return None, None
+    
+    points = np.array(points)
+    x = points[:, 0]
+    y = points[:, 1]
+    
+    coeffs = np.polyfit(x, y, 1)
+    m = coeffs[0]
+    b = coeffs[1]
+    x_min = int(np.min(x))
+    x_max = int(np.max(x))
+    y_min = int(m * x_min + b)
+    y_max = int(m * x_max + b)
+    return (x_min, y_min), (x_max, y_max)
+
+cv2.setUseOptimized(True)
+cv2.ocl.setUseOpenCL(True)
+
+model = YOLO('yolo11n.pt')
+model.to('cuda')
+print(f"Using {model.device}")
+
 video = cv2.VideoCapture('dataset/example_recording.webm')
 
-# read the first frame
+fps = video.get(cv2.CAP_PROP_FPS)
+if fps == 0:
+    fps = 30
+print(f"FPS: {fps}")
+
 ret, frame = video.read()
-# exit if video fails
 if not ret:
-    print("Error: Could not read video file.")
-    exit()
+    print("Can't read video")
+    exit(1)
 
-print("First, select the ROI for the *tracker* and press ENTER.")
-# get the tracker's box
-bbox = cv2.selectROI('Select ROI for Tracker', frame, True)
-# close the roi window
-cv2.destroyWindow('Select ROI for Tracker') 
+print("\nLooking for cars...")
+results = model.predict(frame, conf=0.1, max_det=50, verbose=False, half=True, imgsz=640)
+bboxes = results[0].boxes.xywh.cpu().numpy()
 
-# start the tracker
-tracker.init(frame, bbox)
+if len(bboxes) == 0:
+    print("No cars found")
+    exit(1)
 
-# make a copy for drawing lines
-drawing_frame_copy = frame.copy() 
-# create the drawing window
-cv2.namedWindow(drawing_window_name) 
-# connect the mouse function
-cv2.setMouseCallback(drawing_window_name, draw_lines_callback) 
+num_cars = len(bboxes)
+print(f"Found {num_cars} cars")
+for i in range(num_cars):
+    bbox = bboxes[i]
+    area = bbox[2] * bbox[3]
+    print(f"  {i+1}: area={area:.0f}")
 
-print("\nROI selected. Now, draw your lines in the new window.")
-print("Click in pairs (point 1, point 2 = line 1; point 3, point 4 = line 2, etc.)")
-print(f"Press 'q' or 'Esc' in the '{drawing_window_name}' window to finish and start tracking.")
+# initialize trackers
+trackers = []
+for i in range(num_cars):
+    coords = bboxes[i].tolist()
+    tracker = create_tracker(frame, coords)
+    trackers.append(tracker)
 
-# this is the line drawing loop
-while True:
-    # show the drawing frame
-    cv2.imshow(drawing_window_name, drawing_frame_copy) 
-    key = cv2.waitKey(1) & 0xFF
-    # wait for 'q' or esc to quit
-    if key == ord('q') or key == 27: 
-        break
+TRACKING_DURATION = 3.0
+SAMPLE_INTERVAL = 1.0
 
-# close the drawing window
-cv2.destroyWindow(drawing_window_name) 
+car_tracks = [[] for _ in range(num_cars)]
 
-print("\nLine drawing complete. Starting video playback with tracking.")
+# colors for visualization
+car_colors = [
+    (0, 255, 0), (0, 0, 255), (255, 0, 0), (0, 255, 255),
+    (255, 0, 255), (255, 255, 0), (255, 128, 0), (128, 0, 255),
+    (0, 128, 255), (255, 192, 203), (128, 255, 0), (255, 165, 0),
+]
 
-# main video processing loop
-while True:
-    # read a new frame
+print(f"\nTracking {num_cars} cars...")
+
+frame_num = 0
+frames_per_sample = int(fps * SAMPLE_INTERVAL)
+total_frames = int(fps * TRACKING_DURATION)
+
+print("Processing...")
+last_progress = -1
+active_trackers = list(range(num_cars))
+
+while frame_num < total_frames:
     ret, frame = video.read()
-    # if video ends, stop
     if not ret:
-        print("Video finished.")
-        break  
+        print("Video ended")
+        break
     
-    timer = cv2.getTickCount()
-    # update the tracker position
-    ret_tracker, bbox = tracker.update(frame)
+    progress = int((frame_num / total_frames) * 100)
+    if progress != last_progress and progress % 10 == 0:
+        print(f"{progress}% ({len(active_trackers)} active)")
+        last_progress = progress
     
-    # if tracking is successful
-    if(ret_tracker):
-        # draw the tracker box
-        p1 = (int(bbox[0]), int(bbox[1]))
-        p2 = (int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3]))
-        cv2.rectangle(frame, p1, p2, (255, 0, 0), 2, 1) 
+    should_sample = (frame_num % frames_per_sample == 0)
+    new_active = []
+    for idx in active_trackers:
+        center = update_tracker(trackers[idx], frame)
+        if center is not None:
+            new_active.append(idx)
+            if should_sample:
+                car_tracks[idx].append(center)
     
-    # draw all the saved lines
-    for i in range(0, len(points), 2):
-        # make sure we have a full pair
-        if i + 1 < len(points):
-            # draw one line
-            p1 = points[i]
-            p2 = points[i+1]
-            cv2.line(frame, p1, p2, (0, 0, 255), 2) 
+    active_trackers = new_active
     
-    # show the final frame
-    cv2.imshow('Tracking', frame)
-    
-    # check for quit key
-    if cv2.waitKey(20) & 0xFF == ord('q'):
+    if not active_trackers:
+        print("Trackers stopped")
         break
 
-# clean up
+    frame_num += 1
+
+total_samples = sum(len(track) for track in car_tracks)
+print(f"\nGot {total_samples} samples")
+
+print("\nFitting lines...")
+lane_lines = []
+
+for i in range(len(car_tracks)):
+    positions = car_tracks[i]
+    if len(positions) < 2:
+        lane_lines.append((None, None))
+        continue
+    
+    line_start, line_end = fit_line(positions)
+    lane_lines.append((line_start, line_end))
+
+print("\nClustering...")
+clusters = cluster(lane_lines, distance_threshold=30)
+
+lane_lines_with_count = []
+for cluster in clusters:
+    lines_in_cluster = [lane_lines[idx] for idx in cluster]
+    avg_line = avg_lines(lines_in_cluster)
+    if avg_line[0] is not None:
+        lane_lines_with_count.append((avg_line, len(cluster)))
+
+NUM_LANES = 4
+if len(lane_lines_with_count) > NUM_LANES:
+    final_lane_lines = select_lines(lane_lines_with_count, n=NUM_LANES)
+else:
+    final_lane_lines = [line for line, _ in lane_lines_with_count]
+
+print("\nShowing results...")
+print("Press q to quit")
+
+video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+while True:
+    ret, frame = video.read()
+    if not ret:
+        break
+    
+    for i in range(len(car_tracks)):
+        color = car_colors[i % len(car_colors)]
+        track = car_tracks[i]
+        for pos in track:
+            cv2.circle(frame, pos, 5, color, -1)
+            cv2.circle(frame, pos, 6, (255, 255, 255), 1)
+    
+    for line in final_lane_lines:
+        if line[0] is not None and line[1] is not None:
+            cv2.line(frame, line[0], line[1], (0, 255, 255), 4)
+    
+    text = f"Lane Lines: {len(final_lane_lines)} lanes (from {num_cars} cars)"
+    cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    
+    cv2.imshow("Automated Lane Detection", frame)
+    
+    key = cv2.waitKey(30) & 0xFF
+    if key == ord('q'):
+        break
+
 video.release()
 cv2.destroyAllWindows()
+print("\nDone")
