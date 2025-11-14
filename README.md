@@ -2,7 +2,9 @@
 
 Dhvan Shah, Dan Khoi Nguyen, David Barsoum
 Computational Robotics | Fall 2025
-!(images/image1)
+
+![Opening scene from Office Space](images/image1.png)
+
 Figure 1: The opening scene of *Office Space (1999)*, depicting the frustrating emotions that arise from stop and go traffic.
 
 ---
@@ -25,9 +27,10 @@ Our system aims to utilize a camera on a car or other well-viewing area to deter
 
 Our first attempt used traditional computer vision primitives: Canny edge detection for boundary extraction, and Hough line detection to identify linear features. However, this approach failed in practice because Canny responded strongly to all high-contrast boundaries, including: Guard rails and Jersey barriers, The breakdown lane/shoulder markings, Shadows and texture edges, Artifacts in the video caused by compression
 
-This resulted in an over-detection of “edges” that were not lane markers, making meaningful lane inference unreliable. Additional filtering heuristics (angle filtering, histogram thresholds, ROI constraints) were insufficient because the scene contained multiple valid parallel linear structures that were indistinguishable to edge-based methods.
+This resulted in an over-detection of "edges" that were not lane markers, making meaningful lane inference unreliable. Additional filtering heuristics (angle filtering, histogram thresholds, ROI constraints) were insufficient because the scene contained multiple valid parallel linear structures that were indistinguishable to edge-based methods.
 
-!(images/image2)
+![Canny edge detection attempt](images/image2.gif)
+
 Figure 2: An attempt at using Canny edge detection to detect traffic lanes.
 
 ### Motion-Based Lane Estimation
@@ -58,7 +61,8 @@ Our overall approach is to collect location data for a set of cars over time, fi
 
 This approach overcomes almost all classic lane detection failure modes. It works even when lane markings are missing, and adapts to cars obstructing the lane.
 
-!(images/image3)
+![Motion-based lane detection](images/image3.png)
+
 Figure 3: Lane detection by using motion of the cars to determine lanes.
 
 ## Car Detection
@@ -71,6 +75,8 @@ In the intermediate frames between YOLO detections, we use faster trackers to fo
 
 This hybrid strategy provides the high accuracy of a deep learning detector while maintaining the high-speed performance required for real-time video analysis.
 
+![Multi-car detection](images/image4.png)
+
 Figure 4: Multi car detection with hybrid YOLO and OpenCV trackers
 
 ## Lane Speed
@@ -81,29 +87,34 @@ Before processing the video, the system requires a one-time setup where the user
 
 We first re-associate cars frame-to-frame by finding the nearest neighbor in the same lane. This ensures we are measuring the continuous movement of a single car, not jumping between different cars. An individual car's speed is calculated as the change in its vertical (**Y-axis**) pixel position ($\Delta y$) between the two frames. Since the traffic is moving vertically in the video, this vertical pixel displacement is a reliable proxy for its relative forward speed. All individual speed measurements for every car in a specific lane are collected. The final **LaneSpeed** displayed is the running average of all these individual measurements, providing a stable value to compare which lane is moving fastest over time.
 
+![Lane speed calculation](images/image5.png)
+
 Figure 5: Lane speed calculation
 
 ## Canny Edge Detection
 
 Despite not being referenced in the MVP for this project, one thing we worked on was the Canny Edge Detection and tracking of the car. The code begins by loading a video provided. The user then has the option to manually select a Region of Interest around the car in the first frame, which defines the initial bounding box for tracking. We then initialize an OpenCV MIL tracker to follow the car across frames, updating the bounding box in each frame. Within the tracked ROI, the code applies Canny edge detection, first converting the ROI to grayscale, then blurring it to reduce noise, and finally detecting edges. The resulting edges are overlaid on the original frame or image in green, while the bounding box is drawn in blue. The program displays both the full frame with the highlighted car and the isolated edge-detected ROI.
 
-!(images/image4)
+![Canny edge detection](images/image6.png)
+
 Figure 6: Canny Edge Detection, outlining and tracking one vehicle
 
 ---
 
 # Challenges
 
-Throughout this project, many of the challenges we faced dealt with finding and utilizing a good “data set”. In the context of this project, this would be the videos we would be using, the videos to be analyzed. These videos would need to provide a clear depiction of stop and go traffic on a multi lane highway. We thought this would be simple and easy to find on the internet but for a multitude of reasons this was not the case.
+Throughout this project, many of the challenges we faced dealt with finding and utilizing a good "data set". In the context of this project, this would be the videos we would be using, the videos to be analyzed. These videos would need to provide a clear depiction of stop and go traffic on a multi lane highway. We thought this would be simple and easy to find on the internet but for a multitude of reasons this was not the case.
 
-One issue was that most of the stock videos available online were of normal highways, normal driving speeds, and normal times. This was not ideal data for us because we needed videos of heavy traffic from a top down angle. We realized that it would not make sense for there to be stock footage of this because there is simply no market for that. Traffic videos don’t exist and to get the best angle for us would require either a drone or a very high placed camera. Therefore our next approach was to get the videos ourselves, however we found out flying drones above cars is illegal and the angle we needed was impossible to achieve otherwise. This led us to try to create **AI generated videos** to use as data. The issue with this was simply that AI generated videos were not reliable. Cars would move in weird ways and it was not a good representation of real traffic.
+One issue was that most of the stock videos available online were of normal highways, normal driving speeds, and normal times. This was not ideal data for us because we needed videos of heavy traffic from a top down angle. We realized that it would not make sense for there to be stock footage of this because there is simply no market for that. Traffic videos don't exist and to get the best angle for us would require either a drone or a very high placed camera. Therefore our next approach was to get the videos ourselves, however we found out flying drones above cars is illegal and the angle we needed was impossible to achieve otherwise. This led us to try to create **AI generated videos** to use as data. The issue with this was simply that AI generated videos were not reliable. Cars would move in weird ways and it was not a good representation of real traffic.
 
-!(images/image5)
+![AI generated traffic video](images/image7.png)
+
 Figure 7: A screenshot of an AI generated video of traffic we attempted to use for our model, generated with Google Veo 3.
 
 This led us to pivot to using **MassDOT highway live cams**. An idea we had was to pipe the live stream video into our code to use and view live, but this was impossible because traffic conditions were not always bad and pulling the live stream proved to be out of scope. We instead screen recorded videos of the road during heavy traffic times and used that as our dataset.
 
-!(images/image6)
+![MassDOT highway camera](images/image8.png)
+
 Figure 8: Highway camera footage of Route 9 in Westborough MA, which we used to test our model.
 
 ---
